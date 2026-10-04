@@ -1,0 +1,65 @@
+# Xcode
+#
+# gitignore template for Xcode programs
+# Reference: https://github.com/github/gitignore/blob/main/Swift.gitignore
+
+# Xcode user state and derived data
+xcuserdata/
+*.xcuserdatad
+*.xcscmblueprint
+DerivedData/
+build/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Xcode temporary and legacy files
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+*.xccheckout
+*.moved-aside
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager
+# Note: For apps, it is often recommended to track Package.resolved to ensure deterministic builds.
+# If you prefer to ignore Package.resolved, uncomment the line below.
+# Package.resolved
+.build/
+Packages/
+
+# CocoaPods (if used in the future)
+# Pods/
+# !Podfile.lock
+
+# Carthage (if used in the future)
+Carthage/Build/
+Carthage/Checkouts/
+
+# fastlane (if used in the future)
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Editor and IDE configurations
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
