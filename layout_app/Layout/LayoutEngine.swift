@@ -213,6 +213,81 @@ struct LayoutEngine {
     }
   }
 
+  /// 現在のウィジェットを使い、形状・位置・割り当てをランダムに組み替える。
+  /// 最小タイルサイズを満たす候補だけを採用する。
+  static func shuffling(
+    _ root: LayoutNode?,
+    in size: CGSize
+  ) -> LayoutNode? {
+    guard let root else { return nil }
+
+    let originalIDs = leafIDs(in: root)
+    guard originalIDs.count >= 2 else { return root }
+
+    // 木を毎回作り直すことで、ウィジェットの位置だけでなく、サイズと形も変える。
+    // 現在のキャンバスに収まる候補だけを採用する。
+    for _ in 0..<40 {
+      let candidate = randomLayout(for: originalIDs.shuffled())
+      guard satisfiesMinimumTileSize(candidate, in: size) else { continue }
+
+      let oldFrames = frames(for: root, in: size)
+      let newFrames = frames(for: candidate, in: size)
+      let layoutChanged = originalIDs.contains { id in
+        oldFrames[id] != newFrames[id]
+      }
+
+      if layoutChanged {
+        return candidate
+      }
+    }
+
+    // 極端な数のタイルなどで候補を作れなかった場合も、少なくとも位置は入れ替える。
+    var ids = originalIDs.shuffled()
+    if ids == originalIDs {
+      ids.swapAt(0, 1)
+    }
+    return assigning(ids, to: root)
+  }
+
+  /// 深さが偏りすぎないように分割数を中央寄りに選び、
+  /// 等分割の組み合わせから多様なサイズのタイルを作る。
+  private static func randomLayout(for ids: [String]) -> LayoutNode {
+    guard ids.count > 1 else {
+      return .leaf(ids[0])
+    }
+
+    let lowerBound = max(1, ids.count / 3)
+    let upperBound = min(ids.count - 1, max(lowerBound, (ids.count * 2) / 3))
+    let splitIndex = Int.random(in: lowerBound...upperBound)
+    let axis: SplitAxis = Bool.random() ? .columns : .rows
+
+    return .split(
+      axis: axis,
+      children: [
+        randomLayout(for: Array(ids[..<splitIndex])),
+        randomLayout(for: Array(ids[splitIndex...])),
+      ]
+    )
+  }
+
+  private static func assigning(
+    _ ids: [String],
+    to node: LayoutNode
+  ) -> LayoutNode {
+    var remainingIDs = ids
+
+    func fill(_ node: LayoutNode) -> LayoutNode {
+      switch node {
+      case .leaf:
+        return .leaf(remainingIDs.removeFirst())
+      case .split(let axis, let children):
+        return .split(axis: axis, children: children.map { fill($0) })
+      }
+    }
+
+    return fill(node)
+  }
+
   private static func frames(
     for node: LayoutNode,
     in rect: CGRect

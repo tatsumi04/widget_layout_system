@@ -15,6 +15,14 @@ struct CanvasView: View {
   let onWidgetDragEnded: (WidgetItem, CGPoint) -> Void
   var onWidgetTapped: ((WidgetItem) -> Void)? = nil
   var onWidgetLongPressed: ((WidgetItem) -> Void)? = nil
+  /// キャンバス内を2周（720°）指でなぞった時に呼ばれる
+  var onSwirl: (() -> Void)? = nil
+
+  // 渦巻き検知のための状態（@Stateはビュー内で保持）
+  @State private var canvasSize: CGSize = .zero
+  @State private var swirlAccumulated: CGFloat = 0
+  @State private var swirlLastAngle: CGFloat? = nil
+  @State private var swirlTriggered = false
 
   var body: some View {
     GeometryReader { geo in
@@ -141,6 +149,12 @@ struct CanvasView: View {
             key: CanvasFrameKey.self,
             value: g.frame(in: .global)
           )
+          .onAppear {
+            canvasSize = g.size
+          }
+          .onChange(of: g.size) { newSize in
+            canvasSize = newSize
+          }
       }
     )
     .clipShape(
@@ -148,6 +162,51 @@ struct CanvasView: View {
         cornerRadius: 24,
         style: .continuous
       )
+    )
+    .simultaneousGesture(
+      // 渦巻き検知：ウィジェットまたはスロットをドラッグ中に並列で動作する
+      DragGesture(minimumDistance: 0, coordinateSpace: .local)
+        .onChanged { value in
+          // 選択モード中、またはドラッグ中でない場合は無効
+          guard !isSelectionMode, onSwirl != nil, !swirlTriggered else { return }
+          guard draggingWidgetID != nil || previewSlot != nil else { return }
+
+          let currentSize = canvasSize == .zero ? CGSize(width: 270, height: 360) : canvasSize
+          let cx = currentSize.width / 2
+          let cy = currentSize.height / 2
+          let dx = value.location.x - cx
+          let dy = value.location.y - cy
+          let radius = sqrt(dx * dx + dy * dy)
+
+          // 中心に近すぎる（50pt以内）指の動きは誤判定回避のためスキップ
+          guard radius > 50 else {
+            swirlLastAngle = nil
+            return
+          }
+
+          let angle = atan2(dy, dx)
+
+          if let last = swirlLastAngle {
+            var delta = angle - last
+            // 角度の折り返しを補正（-π〜π の範囲に正規化）
+            if delta > .pi  { delta -= 2 * .pi }
+            if delta < -.pi { delta += 2 * .pi }
+
+            swirlAccumulated += delta
+
+            // 2周（±720° = ±4π）に達したらシャッフル発動
+            if abs(swirlAccumulated) >= 4 * .pi {
+              swirlTriggered = true
+              UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+              onSwirl?()
+            }
+          }
+
+          swirlLastAngle = angle
+        }
+        .onEnded { _ in
+          resetSwirl()
+        }
     )
   }
 
@@ -161,5 +220,11 @@ struct CanvasView: View {
     }
 
     return widgets.first { $0.id == id }
+  }
+
+  private func resetSwirl() {
+    swirlAccumulated = 0
+    swirlLastAngle = nil
+    swirlTriggered = false
   }
 }

@@ -23,6 +23,15 @@ struct ContentView: View {
   @State private var snapshotWidgets: [WidgetItem] = []
   @State private var snapshotLayout: LayoutNode?
 
+  // MARK: - Shuffle State
+
+  @State private var canvasSpinAngle: Double = 0
+  @State private var showShuffleUndoToast = false
+  @State private var shuffleSnapshot: LayoutNode? = nil
+  @State private var shuffleUndoTask: Task<Void, Never>? = nil
+  @State private var didSwirlDuringDrag = false
+  @State private var isShuffleLayoutAnimating = false
+
   // MARK: - Display Layout (Preview)
 
   private var displayLayout: LayoutNode? {
@@ -86,21 +95,7 @@ struct ContentView: View {
             Spacer()
           }
 
-          CanvasView(
-            layout: displayLayout,
-            widgets: widgets,
-            previewSlot: dockDragSlot,
-            draggingWidgetID: canvasDragId,
-            isDraggingOutside: isOutsideCanvas(canvasDragGlobalPos),
-            shouldAnimateLayout: dockDragSlot != nil || canvasDragId != nil,
-            isSelectionMode: isSelectionMode,
-            selectedWidgetIDs: selectedWidgetIDs,
-            onWidgetDragChanged: handleCanvasDragChanged,
-            onWidgetDragEnded: handleCanvasDragEnded,
-            onWidgetTapped: handleWidgetTapped,
-            onWidgetLongPressed: handleWidgetLongPressed
-          )
-          .padding(.horizontal, 24)
+          canvasSection
 
           if isSelectionMode {
             Spacer()
@@ -151,11 +146,70 @@ struct ContentView: View {
             rootFrame: rootGeo.frame(in: .global)
           )
         }
+
+        // シャッフル後のトーストUndoバー
+        if showShuffleUndoToast {
+          VStack {
+            Spacer()
+
+            HStack(spacing: 12) {
+              Image(systemName: "shuffle")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.secondary)
+
+              Text("シャッフルしました")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(.primary)
+
+              Spacer()
+
+              Button("元に戻す") {
+                undoShuffle()
+              }
+              .font(.system(size: 15, weight: .bold))
+              .foregroundColor(.accentColor)
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .background(
+              Capsule()
+                .fill(.regularMaterial)
+                .shadow(color: Color.black.opacity(0.12), radius: 12, y: 4)
+            )
+            .padding(.horizontal, 24)
+            .padding(.bottom, 120)
+          }
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
       }
     }
     .onPreferenceChange(CanvasFrameKey.self) { frame in
       canvasGlobalFrame = frame
     }
+  }
+
+  // CanvasViewをbody外のプロパティに分離（ViewBuilderのlet制約回避）
+  @ViewBuilder
+  private var canvasSection: some View {
+    CanvasView(
+      layout: displayLayout,
+      widgets: widgets,
+      previewSlot: dockDragSlot,
+      draggingWidgetID: canvasDragId,
+      isDraggingOutside: isOutsideCanvas(canvasDragGlobalPos),
+      shouldAnimateLayout: dockDragSlot != nil || canvasDragId != nil || isShuffleLayoutAnimating,
+      isSelectionMode: isSelectionMode,
+      selectedWidgetIDs: selectedWidgetIDs,
+      onWidgetDragChanged: handleCanvasDragChanged,
+      onWidgetDragEnded: handleCanvasDragEnded,
+      onWidgetTapped: handleWidgetTapped,
+      onWidgetLongPressed: handleWidgetLongPressed,
+      onSwirl: {
+        shuffleWidgets()
+      }
+    )
+    .rotationEffect(.degrees(canvasSpinAngle))
+    .padding(.horizontal, 24)
   }
 
   // MARK: - Selection Header Bar
@@ -399,6 +453,85 @@ struct ContentView: View {
     }
   }
 
+  // MARK: - Shuffle Actions
+
+  private func shuffleWidgets() {
+    guard widgets.count >= 2 else { return }
+
+    // ドラッグ中にシャッフルされた場合、ドラッグ終了時の再配置や誤削除を防止
+    didSwirlDuringDrag = true
+    canvasDragId = nil
+    dockDragSlot = nil
+    isDockDragOverCanvas = false
+    isShuffleLayoutAnimating = true
+
+    // シャッフル前のスナップショットを保存（1回分だけ保持）
+    shuffleSnapshot = layout
+
+    // ステップ1: キャンバスがキュッと巻き込まれる予兆アニメーション
+    withAnimation(.easeIn(duration: 0.25)) {
+      canvasSpinAngle = 15
+    }
+
+    // ステップ2: 渦巻きスピンからシャッフル展開
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+      withAnimation(.spring(response: 0.55, dampingFraction: 0.6)) {
+        canvasSpinAngle = 720
+      }
+    }
+
+    // ステップ3: シャッフル実行（スピン中盤でIDを入れ替え）
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+      withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+        layout = LayoutEngine.shuffling(
+          layout,
+          in: canvasGlobalFrame.size
+        )
+      }
+    }
+
+    // ステップ4: 角度をリセットする。720°と0°は見た目が同じなので、
+    // アニメーションなしで正規化し、逆方向の回転を発生させない。
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
+      var transaction = Transaction()
+      transaction.disablesAnimations = true
+      withTransaction(transaction) {
+        canvasSpinAngle = 0
+        isShuffleLayoutAnimating = false
+      }
+    }
+
+    // トーストUndoバーを表示（前のタスクがあればキャンセル）
+    shuffleUndoTask?.cancel()
+    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+      showShuffleUndoToast = true
+    }
+
+    // 5秒後に自動消滅
+    let task = Task {
+      try? await Task.sleep(for: .seconds(5))
+      guard !Task.isCancelled else { return }
+      await MainActor.run {
+        withAnimation(.easeOut(duration: 0.3)) {
+          showShuffleUndoToast = false
+          shuffleSnapshot = nil
+        }
+      }
+    }
+    shuffleUndoTask = task
+  }
+
+  private func undoShuffle() {
+    guard let snapshot = shuffleSnapshot else { return }
+    shuffleUndoTask?.cancel()
+    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+      layout = snapshot
+      showShuffleUndoToast = false
+      shuffleSnapshot = nil
+    }
+  }
+
   // MARK: - Canvas Drag Handlers
 
   private func handleCanvasDragChanged(widget: WidgetItem, location: CGPoint) {
@@ -408,6 +541,12 @@ struct ContentView: View {
   }
 
   private func handleCanvasDragEnded(widget: WidgetItem, location: CGPoint) {
+    if didSwirlDuringDrag {
+      didSwirlDuringDrag = false
+      canvasDragId = nil
+      return
+    }
+
     guard !isSelectionMode else {
       canvasDragId = nil
       return
@@ -460,6 +599,12 @@ struct ContentView: View {
   }
 
   private func handleDockDragEnded(slot: DockSlot, location: CGPoint) {
+    if didSwirlDuringDrag {
+      didSwirlDuringDrag = false
+      dockDragSlot = nil
+      isDockDragOverCanvas = false
+      return
+    }
     var transaction = Transaction()
     transaction.disablesAnimations = true
 
