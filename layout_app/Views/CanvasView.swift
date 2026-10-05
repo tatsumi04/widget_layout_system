@@ -9,8 +9,12 @@ struct CanvasView: View {
   let draggingWidgetID: String?
   let isDraggingOutside: Bool
   let shouldAnimateLayout: Bool
+  var isSelectionMode: Bool = false
+  var selectedWidgetIDs: Set<String> = []
   let onWidgetDragChanged: (WidgetItem, CGPoint) -> Void
   let onWidgetDragEnded: (WidgetItem, CGPoint) -> Void
+  var onWidgetTapped: ((WidgetItem) -> Void)? = nil
+  var onWidgetLongPressed: ((WidgetItem) -> Void)? = nil
 
   var body: some View {
     GeometryReader { geo in
@@ -42,15 +46,47 @@ struct CanvasView: View {
             let isPreview =
               id == LayoutConfiguration.previewWidgetID
 
+            let isSelected = selectedWidgetIDs.contains(widget.id)
+
             let tile = WidgetTile(
               widget: widget,
               rect: rect,
               cornerRadius: LayoutEngine.cornerRadius,
-              shouldAnimateFrame: shouldAnimateLayout
+              shouldAnimateFrame: shouldAnimateLayout,
+              isSelectionMode: isSelectionMode,
+              isSelected: isSelected
             )
 
             if isPreview {
               tile
+                .position(x: rect.midX, y: rect.midY)
+                .animation(
+                  shouldAnimateLayout
+                    ? LayoutConfiguration.previewAnimation
+                    : nil,
+                  value: rect
+                )
+            } else if isSelectionMode {
+              // 選択モード中はタップで選択・選択解除を切り替え、ドラッグは無効化する。
+              // .positionより前に.contentShapeと.onTapGestureを適用することで、
+              // 他のタイルのタップ領域を遮断せず、各ウィジェット領域内のみでタップが反応する。
+              tile
+                .contentShape(
+                  RoundedRectangle(
+                    cornerRadius: LayoutEngine.cornerRadius,
+                    style: .continuous
+                  )
+                )
+                .onTapGesture {
+                  onWidgetTapped?(widget)
+                }
+                .position(x: rect.midX, y: rect.midY)
+                .animation(
+                  shouldAnimateLayout
+                    ? LayoutConfiguration.previewAnimation
+                    : nil,
+                  value: rect
+                )
             } else {
               // 外へドラッグ中は元のタイルを透明にするが、ビューは保持して
               // Gesture が最後まで継続するようにする。
@@ -60,6 +96,18 @@ struct CanvasView: View {
 
               tile
                 .opacity(isHiddenDraggedTile ? 0 : 1)
+                .contentShape(
+                  RoundedRectangle(
+                    cornerRadius: LayoutEngine.cornerRadius,
+                    style: .continuous
+                  )
+                )
+                .simultaneousGesture(
+                  LongPressGesture(minimumDuration: 0.45)
+                    .onEnded { _ in
+                      onWidgetLongPressed?(widget)
+                    }
+                )
                 .gesture(
                   DragGesture(
                     minimumDistance: 1,
@@ -71,6 +119,13 @@ struct CanvasView: View {
                   .onEnded { value in
                     onWidgetDragEnded(widget, value.location)
                   }
+                )
+                .position(x: rect.midX, y: rect.midY)
+                .animation(
+                  shouldAnimateLayout
+                    ? LayoutConfiguration.previewAnimation
+                    : nil,
+                  value: rect
                 )
             }
           }

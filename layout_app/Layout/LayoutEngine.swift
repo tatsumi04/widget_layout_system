@@ -163,21 +163,53 @@ struct LayoutEngine {
     _ id: String,
     from root: LayoutNode?
   ) -> LayoutNode? {
+    removing(Set([id]), from: root)
+  }
+
+  static func removing(
+    _ ids: Set<String>,
+    from root: LayoutNode?
+  ) -> LayoutNode? {
     guard let root else { return nil }
 
     switch root {
     case .leaf(let currentID):
-      return currentID == id ? nil : root
+      return ids.contains(currentID) ? nil : root
 
     case .split(let axis, let children):
       let remaining = children.compactMap {
-        removing(id, from: $0)
+        removing(ids, from: $0)
       }
 
       guard !remaining.isEmpty else { return nil }
       if remaining.count == 1 { return remaining[0] }
 
       return .split(axis: axis, children: remaining)
+    }
+  }
+
+  static func swapping(
+    _ firstID: String,
+    _ secondID: String,
+    in root: LayoutNode?
+  ) -> LayoutNode? {
+    guard let root else { return nil }
+
+    switch root {
+    case .leaf(let id):
+      if id == firstID {
+        return .leaf(secondID)
+      } else if id == secondID {
+        return .leaf(firstID)
+      } else {
+        return root
+      }
+
+    case .split(let axis, let children):
+      let swappedChildren = children.compactMap {
+        swapping(firstID, secondID, in: $0)
+      }
+      return .split(axis: axis, children: swappedChildren)
     }
   }
 

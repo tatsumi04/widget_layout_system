@@ -15,9 +15,22 @@ struct ContentView: View {
 
   @State private var canvasGlobalFrame: CGRect = .zero
 
+  // MARK: - Selection Mode State
+
+  @State private var isSelectionMode = false
+  @State private var selectedWidgetIDs: Set<String> = []
+  @State private var showColorPicker = false
+  @State private var snapshotWidgets: [WidgetItem] = []
+  @State private var snapshotLayout: LayoutNode?
+
   // MARK: - Display Layout (Preview)
 
   private var displayLayout: LayoutNode? {
+    // 選択モード中はプレビュー計算を行わない
+    if isSelectionMode {
+      return layout
+    }
+
     // ドックから追加中：キャンバス内にいるときだけ配置プレビューを表示する。
     if dockDragSlot != nil, isDockDragOverCanvas {
       let local = toCanvasLocal(dockDragGlobalPos)
@@ -66,7 +79,12 @@ struct ContentView: View {
           .ignoresSafeArea()
 
         VStack(spacing: 0) {
-          Spacer()
+          if isSelectionMode {
+            selectionHeaderBar
+              .transition(.move(edge: .top).combined(with: .opacity))
+          } else {
+            Spacer()
+          }
 
           CanvasView(
             layout: displayLayout,
@@ -75,29 +93,41 @@ struct ContentView: View {
             draggingWidgetID: canvasDragId,
             isDraggingOutside: isOutsideCanvas(canvasDragGlobalPos),
             shouldAnimateLayout: dockDragSlot != nil || canvasDragId != nil,
+            isSelectionMode: isSelectionMode,
+            selectedWidgetIDs: selectedWidgetIDs,
             onWidgetDragChanged: handleCanvasDragChanged,
-            onWidgetDragEnded: handleCanvasDragEnded
+            onWidgetDragEnded: handleCanvasDragEnded,
+            onWidgetTapped: handleWidgetTapped,
+            onWidgetLongPressed: handleWidgetLongPressed
           )
           .padding(.horizontal, 24)
 
-          Spacer()
+          if isSelectionMode {
+            Spacer()
 
-          Text("\(widgets.count) 個")
-            .font(
-              .system(.caption, design: .monospaced)
-                .weight(.medium)
+            selectionBottomBar
+              .transition(.move(edge: .bottom).combined(with: .opacity))
+          } else {
+            Spacer()
+
+            Text("\(widgets.count) 個")
+              .font(
+                .system(.caption, design: .monospaced)
+                  .weight(.medium)
+              )
+              .foregroundColor(.secondary)
+              .padding(.bottom, 6)
+              .opacity(widgets.isEmpty ? 0 : 1)
+              .accessibilityHidden(widgets.isEmpty)
+
+            DockView(
+              onDragChanged: handleDockDragChanged,
+              onDragEnded: handleDockDragEnded
             )
-            .foregroundColor(.secondary)
-            .padding(.bottom, 6)
-            .opacity(widgets.isEmpty ? 0 : 1)
-            .accessibilityHidden(widgets.isEmpty)
-
-          DockView(
-            onDragChanged: handleDockDragChanged,
-            onDragEnded: handleDockDragEnded
-          )
-          .padding(.bottom, 48)
+            .padding(.bottom, 48)
+          }
         }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isSelectionMode)
 
         // キャンバス外ではドラッグ中の円を表示し、内側に入ったら隠す。
         if let slot = dockDragSlot,
@@ -128,14 +158,261 @@ struct ContentView: View {
     }
   }
 
+  // MARK: - Selection Header Bar
+
+  private var selectionHeaderBar: some View {
+    HStack {
+      Button("キャンセル") {
+        cancelSelectionMode()
+      }
+      .font(.system(size: 16, weight: .regular))
+
+      Spacer()
+
+      Text("\(selectedWidgetIDs.count) 個選択中")
+        .font(.system(size: 16, weight: .semibold))
+        .foregroundColor(.primary)
+
+      Spacer()
+
+      Button("完了") {
+        exitSelectionMode()
+      }
+      .font(.system(size: 16, weight: .bold))
+    }
+    .padding(.horizontal, 24)
+    .padding(.top, 16)
+    .padding(.bottom, 16)
+  }
+
+  // MARK: - Selection Bottom Bar
+
+  private var selectionBottomBar: some View {
+    VStack(spacing: 16) {
+      if showColorPicker {
+        HStack(spacing: 16) {
+          ForEach(DockSlot.all) { slot in
+            Button(action: {
+              applyColorToSelectedWidgets(slot.color)
+            }) {
+              Circle()
+                .fill(slot.color)
+                .frame(width: 36, height: 36)
+                .overlay(
+                  Circle()
+                    .strokeBorder(Color.white.opacity(0.85), lineWidth: 2)
+                )
+                .shadow(color: slot.color.opacity(0.4), radius: 4, y: 2)
+            }
+            .buttonStyle(.plain)
+          }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 18)
+        .background(
+          Capsule()
+            .fill(Color(.secondarySystemBackground))
+            .shadow(color: Color.black.opacity(0.08), radius: 8, y: 3)
+        )
+        .transition(.scale.combined(with: .opacity))
+      }
+
+      HStack(spacing: 8) {
+        // 全選択・全解除ボタン
+        Button(action: toggleSelectAll) {
+          Label(
+            isAllSelected ? "全解除" : "全選択",
+            systemImage: isAllSelected ? "checkmark.circle.fill" : "checkmark.circle"
+          )
+          .font(.system(size: 14, weight: .medium))
+          .foregroundColor(.primary)
+          .padding(.horizontal, 10)
+          .padding(.vertical, 12)
+          .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+              .fill(Color(.secondarySystemBackground))
+          )
+        }
+        .disabled(widgets.isEmpty)
+
+        // 2つ選択時のみ表示される入れ替えボタン
+        if selectedWidgetIDs.count == 2 {
+          Button(action: swapSelectedWidgets) {
+            Label("入れ替え", systemImage: "arrow.left.arrow.right")
+              .font(.system(size: 14, weight: .semibold))
+              .foregroundColor(.primary)
+              .padding(.horizontal, 10)
+              .padding(.vertical, 12)
+              .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                  .fill(Color.accentColor.opacity(0.18))
+              )
+          }
+          .transition(.scale.combined(with: .opacity))
+        }
+
+        // 色変更ボタン
+        Button(action: {
+          withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+            showColorPicker.toggle()
+          }
+        }) {
+          Label("色を変更", systemImage: "paintpalette.fill")
+            .font(.system(size: 14, weight: .medium))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 12)
+            .background(
+              RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(
+                  showColorPicker
+                    ? Color.accentColor.opacity(0.15)
+                    : Color(.secondarySystemBackground)
+                )
+            )
+        }
+        .disabled(selectedWidgetIDs.isEmpty)
+        .opacity(selectedWidgetIDs.isEmpty ? 0.45 : 1)
+
+        // 削除ボタン
+        Button(action: deleteSelectedWidgets) {
+          Label("削除", systemImage: "trash.fill")
+            .font(.system(size: 14, weight: .medium))
+            .foregroundColor(selectedWidgetIDs.isEmpty ? .secondary : .red)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 12)
+            .background(
+              RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(
+                  selectedWidgetIDs.isEmpty
+                    ? Color(.secondarySystemBackground)
+                    : Color.red.opacity(0.12)
+                )
+            )
+        }
+        .disabled(selectedWidgetIDs.isEmpty)
+        .opacity(selectedWidgetIDs.isEmpty ? 0.45 : 1)
+      }
+      .animation(.spring(response: 0.35, dampingFraction: 0.8), value: selectedWidgetIDs.count == 2)
+    }
+    .padding(.bottom, 48)
+  }
+
+  // MARK: - Selection Actions
+
+  private func swapSelectedWidgets() {
+    guard selectedWidgetIDs.count == 2 else { return }
+    let ids = Array(selectedWidgetIDs)
+    let firstID = ids[0]
+    let secondID = ids[1]
+
+    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+      layout = LayoutEngine.swapping(firstID, secondID, in: layout)
+    }
+  }
+
+  private var isAllSelected: Bool {
+    !widgets.isEmpty && selectedWidgetIDs.count == widgets.count
+  }
+
+  private func handleWidgetLongPressed(widget: WidgetItem) {
+    guard !isSelectionMode else { return }
+    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    snapshotWidgets = widgets
+    snapshotLayout = layout
+    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+      canvasDragId = nil
+      isSelectionMode = true
+      selectedWidgetIDs = [widget.id]
+      showColorPicker = false
+    }
+  }
+
+  private func handleWidgetTapped(widget: WidgetItem) {
+    guard isSelectionMode else { return }
+    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    withAnimation(.easeInOut(duration: 0.15)) {
+      if selectedWidgetIDs.contains(widget.id) {
+        selectedWidgetIDs.remove(widget.id)
+      } else {
+        selectedWidgetIDs.insert(widget.id)
+      }
+    }
+  }
+
+  private func toggleSelectAll() {
+    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    withAnimation(.easeInOut(duration: 0.2)) {
+      if isAllSelected {
+        selectedWidgetIDs.removeAll()
+      } else {
+        selectedWidgetIDs = Set(widgets.map { $0.id })
+      }
+    }
+  }
+
+  private func cancelSelectionMode() {
+    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    withAnimation(.easeInOut(duration: 0.2)) {
+      widgets = snapshotWidgets
+      layout = snapshotLayout
+      isSelectionMode = false
+      selectedWidgetIDs.removeAll()
+      showColorPicker = false
+      snapshotWidgets = []
+      snapshotLayout = nil
+    }
+  }
+
+  private func exitSelectionMode() {
+    withAnimation(.easeInOut(duration: 0.2)) {
+      isSelectionMode = false
+      selectedWidgetIDs.removeAll()
+      showColorPicker = false
+      snapshotWidgets = []
+      snapshotLayout = nil
+    }
+  }
+
+  private func applyColorToSelectedWidgets(_ color: Color) {
+    guard !selectedWidgetIDs.isEmpty else { return }
+    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    withAnimation(.easeInOut(duration: 0.2)) {
+      widgets = widgets.map { item in
+        if selectedWidgetIDs.contains(item.id) {
+          return WidgetItem(id: item.id, color: color)
+        }
+        return item
+      }
+    }
+  }
+
+  private func deleteSelectedWidgets() {
+    guard !selectedWidgetIDs.isEmpty else { return }
+    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+    withAnimation(.easeInOut(duration: 0.2)) {
+      widgets.removeAll { selectedWidgetIDs.contains($0.id) }
+      layout = LayoutEngine.removing(selectedWidgetIDs, from: layout)
+      selectedWidgetIDs.removeAll()
+      showColorPicker = false
+    }
+  }
+
   // MARK: - Canvas Drag Handlers
 
   private func handleCanvasDragChanged(widget: WidgetItem, location: CGPoint) {
+    guard !isSelectionMode else { return }
     canvasDragId = widget.id
     canvasDragGlobalPos = location
   }
 
   private func handleCanvasDragEnded(widget: WidgetItem, location: CGPoint) {
+    guard !isSelectionMode else {
+      canvasDragId = nil
+      return
+    }
+
     var transaction = Transaction()
     transaction.disablesAnimations = true
 

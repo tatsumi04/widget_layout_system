@@ -23,7 +23,7 @@ struct EmptyPlaceholderView: View {
           .padding(.bottom, 2)
 
         Text(
-          "Hi\nDrag and Drop your widget to unleash your creativity!"
+          "こんにちは！\nパーツを動かして、好きな形にしましょう!"
         )
         .font(.subheadline.weight(.medium))
         .foregroundColor(.secondary)
