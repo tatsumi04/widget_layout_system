@@ -18,10 +18,12 @@ struct CanvasView: View {
   /// キャンバス内を2周（720°）指でなぞった時に呼ばれる
   var onSwirl: (() -> Void)? = nil
 
-  // 渦巻き検知のための状態（@Stateはビュー内で保持）
+  // 渦巻き検知のための状態（ジェスチャー1回分だけCanvasView内で保持）
   @State private var canvasSize: CGSize = .zero
+  // 角度差の符号付き合計。時計回り・反時計回りのどちらでも2周で発動する。
   @State private var swirlAccumulated: CGFloat = 0
   @State private var swirlLastAngle: CGFloat? = nil
+  // 閾値到達後、同じドラッグ中に複数回シャッフルしないためのラッチ。
   @State private var swirlTriggered = false
 
   var body: some View {
@@ -223,6 +225,7 @@ struct CanvasView: View {
   }
 
   private func resetSwirl() {
+    // DragGestureの終了ごとに検知状態を捨て、次のドラッグを独立して判定する。
     swirlAccumulated = 0
     swirlLastAngle = nil
     swirlTriggered = false

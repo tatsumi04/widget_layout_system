@@ -133,6 +133,7 @@ struct LayoutEngine {
     _ node: LayoutNode,
     in size: CGSize
   ) -> Bool {
+    // 生成・追加のどちらでも使う共通の安全条件。1つでも下限未満なら採用しない。
     let rects = frames(for: node, in: size)
     return rects.values.allSatisfy {
       $0.width >= minimumTileSize &&
@@ -242,6 +243,7 @@ struct LayoutEngine {
     }
 
     // 極端な数のタイルなどで候補を作れなかった場合も、少なくとも位置は入れ替える。
+    // 既存ツリーを使うため、このフォールバックで最小サイズ制約を悪化させない。
     var ids = originalIDs.shuffled()
     if ids == originalIDs {
       ids.swapAt(0, 1)
@@ -274,6 +276,8 @@ struct LayoutEngine {
     _ ids: [String],
     to node: LayoutNode
   ) -> LayoutNode {
+    // ids は node の葉数と同数であることが呼び出し側の前提。
+    // 木の形を保ったまま、走査順にIDだけを差し替える。
     var remainingIDs = ids
 
     func fill(_ node: LayoutNode) -> LayoutNode {

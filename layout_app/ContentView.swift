@@ -25,11 +25,16 @@ struct ContentView: View {
 
   // MARK: - Shuffle State
 
+  // キャンバス全体にだけ適用する演出用の角度。レイアウトの座標には影響しない。
   @State private var canvasSpinAngle: Double = 0
   @State private var showShuffleUndoToast = false
+  // シャッフルはウィジェット自体を変更しないため、復元対象はレイアウトだけでよい。
   @State private var shuffleSnapshot: LayoutNode? = nil
+  // 新しいシャッフルのUndo期限を、以前のタスクが消去しないよう保持する。
   @State private var shuffleUndoTask: Task<Void, Never>? = nil
+  // 渦巻きの起点になったドラッグのonEndedで、再配置・削除を確定しないためのフラグ。
   @State private var didSwirlDuringDrag = false
+  // シャッフル開始時はドラッグ状態を解除するため、タイルの変形アニメーションを別途維持する。
   @State private var isShuffleLayoutAnimating = false
 
   // MARK: - Display Layout (Preview)
@@ -197,6 +202,7 @@ struct ContentView: View {
       previewSlot: dockDragSlot,
       draggingWidgetID: canvasDragId,
       isDraggingOutside: isOutsideCanvas(canvasDragGlobalPos),
+      // シャッフル中はドラッグIDをクリア済みでも、位置とサイズの補間を有効にする。
       shouldAnimateLayout: dockDragSlot != nil || canvasDragId != nil || isShuffleLayoutAnimating,
       isSelectionMode: isSelectionMode,
       selectedWidgetIDs: selectedWidgetIDs,
@@ -480,7 +486,8 @@ struct ContentView: View {
       }
     }
 
-    // ステップ3: シャッフル実行（スピン中盤でIDを入れ替え）
+    // ステップ3: スピン中盤で、配置ツリーごと作り直す。
+    // 画面上の実サイズを渡し、最小タイルサイズを満たす候補だけを採用する。
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
       withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
         layout = LayoutEngine.shuffling(
@@ -490,8 +497,8 @@ struct ContentView: View {
       }
     }
 
-    // ステップ4: 角度をリセットする。720°と0°は見た目が同じなので、
-    // アニメーションなしで正規化し、逆方向の回転を発生させない。
+    // ステップ4: 720°と0°は見た目が同じなので、アニメーションなしで正規化する。
+    // ここをアニメーションすると逆方向の回転として描画される。
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
       var transaction = Transaction()
       transaction.disablesAnimations = true
