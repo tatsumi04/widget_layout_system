@@ -154,7 +154,7 @@ struct CanvasView: View {
           .onAppear {
             canvasSize = g.size
           }
-          .onChange(of: g.size) { newSize in
+          .onChange(of: g.size) { _, newSize in
             canvasSize = newSize
           }
       }
