@@ -4,7 +4,7 @@
 
 対応OSは iOS 17 以降です。
 
-設計の概要は [docs/design.md](docs/design.md) を参照してください。
+設計書は [docs/design.md](docs/design.md) を参照してください。
 
 ## 操作方法
 
@@ -38,7 +38,7 @@
 
 ## コード構成
 
-- `layout_app/ContentView.swift`: 画面状態、操作の受け取り、シャッフル・選択モードの制御
+- `layout_app/ContentView/`: `ContentView` の画面状態と、選択・シャッフル・ドラッグ操作ごとの実装
 - `layout_app/Views/`: キャンバス、ウィジェット、追加用ドックなどの画面部品
 - `layout_app/Layout/`: レイアウトツリーの計算、追加・移動・削除・シャッフルの規則
 - `layout_app/Models/`: ウィジェットとレイアウトツリーのデータモデル
@@ -50,4 +50,3 @@
 - レイアウトの計算は `LayoutEngine` に集約し、ビューは計算結果を描画します。
 - レイアウト変更時は最小タイルサイズを守ります。
 - 操作に伴う一時的な状態は `ContentView` と `CanvasView` が保持し、永続的な配置は `LayoutNode` で表現します。
-
